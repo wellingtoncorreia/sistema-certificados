@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useState } from 'react';
-import { Upload, FileType, FileArchive } from 'lucide-react';
+import { Upload, FileType, FileArchive, User, Calendar } from 'lucide-react';
 import { useAuth } from '../hooks/useAuth';
 import Sidebar from '../../components/Sidebar';
 import Header from '../../components/Header';
@@ -16,22 +16,36 @@ export default function CertificadosPage() {
 
   const [layout, setLayout] = useState<File | null>(null);
   const [pdfRemessa, setPdfRemessa] = useState<File | null>(null);
+
+  const [semestre, setSemestre] = useState("1º");
+  const [ano, setAno] = useState("2026");
+  const [coordenador, setCoordenador] = useState("");
+
   const [isProcessing, setIsProcessing] = useState(false);
 
   const handleProcessar = async () => {
+
     if (!pdfRemessa || !layout) {
-      alert("Envie os dois arquivos.");
+      alert("Envie o layout e o relatório.");
+      return;
+    }
+
+    if (!coordenador.trim()) {
+      alert("Informe o nome do coordenador pedagógico.");
       return;
     }
 
     setIsProcessing(true);
 
     try {
+
       const formData = new FormData();
 
-      // ⚠️ nomes DEVEM ser iguais aos da API
       formData.append('file', pdfRemessa);
       formData.append('layout', layout);
+      formData.append('semestre', semestre);
+      formData.append('ano', ano);
+      formData.append('coordenador', coordenador);
 
       const response = await fetch('/api/gerar-certificados', {
         method: 'POST',
@@ -46,19 +60,15 @@ export default function CertificadosPage() {
           throw new Error(err.error || "Erro ao processar");
         }
 
-        const text = await response.text();
-        console.error(text);
         throw new Error("Erro interno do servidor");
       }
 
-      // ✅ download automático do PDF
       const blob = await response.blob();
       const url = window.URL.createObjectURL(blob);
 
       const link = document.createElement('a');
       link.href = url;
       link.download = 'certificados_senai.pdf';
-
       document.body.appendChild(link);
       link.click();
       link.remove();
@@ -73,8 +83,6 @@ export default function CertificadosPage() {
     }
   };
 
-  /* ================= LOADING AUTH ================= */
-
   if (authLoading) {
     return (
       <div className="flex min-h-screen items-center justify-center">
@@ -82,8 +90,6 @@ export default function CertificadosPage() {
       </div>
     );
   }
-
-  /* ================= UI ================= */
 
   return (
     <div className="flex min-h-screen bg-gray-100 font-sans">
@@ -100,11 +106,13 @@ export default function CertificadosPage() {
                 Emissão de Certificados
               </h1>
               <p className="text-slate-500 mt-2">
-                Envie o layout e o relatório de notas.
+                Envie os arquivos e preencha os dados institucionais.
               </p>
             </header>
 
-            <div className="grid md:grid-cols-2 gap-8">
+            {/* ================= UPLOADS ================= */}
+
+            <div className="grid md:grid-cols-2 gap-8 mb-12">
 
               <UploadCard
                 title="Fundo do Certificado"
@@ -116,7 +124,7 @@ export default function CertificadosPage() {
               />
 
               <UploadCard
-                title="Relatório de Notas"
+                title="Relatório de Notas (PDF)"
                 file={pdfRemessa}
                 accept="application/pdf"
                 id="pdf-input"
@@ -126,11 +134,63 @@ export default function CertificadosPage() {
 
             </div>
 
-            <div className="mt-12 flex justify-center">
+            {/* ================= DADOS DINÂMICOS ================= */}
+
+            <div className="grid md:grid-cols-3 gap-8 mb-12">
+
+              {/* Semestre */}
+              <div className="space-y-2">
+                <label className="font-semibold text-slate-700 flex items-center gap-2">
+                  <Calendar size={18} />
+                  Semestre
+                </label>
+                <select
+                  value={semestre}
+                  onChange={(e)=>setSemestre(e.target.value)}
+                  className="w-full border p-3 rounded-lg focus:ring-2 focus:ring-blue-500"
+                >
+                  <option value="1º">1º Semestre</option>
+                  <option value="2º">2º Semestre</option>
+                </select>
+              </div>
+
+              {/* Ano */}
+              <div className="space-y-2">
+                <label className="font-semibold text-slate-700">
+                  Ano Letivo
+                </label>
+                <input
+                  type="number"
+                  value={ano}
+                  onChange={(e)=>setAno(e.target.value)}
+                  className="w-full border p-3 rounded-lg focus:ring-2 focus:ring-blue-500"
+                />
+              </div>
+
+              {/* Coordenador */}
+              <div className="space-y-2">
+                <label className="font-semibold text-slate-700 flex items-center gap-2">
+                  <User size={18} />
+                  Coordenador Pedagógico
+                </label>
+                <input
+                  type="text"
+                  value={coordenador}
+                  onChange={(e)=>setCoordenador(e.target.value)}
+                  placeholder="Nome completo"
+                  className="w-full border p-3 rounded-lg focus:ring-2 focus:ring-blue-500"
+                />
+              </div>
+
+            </div>
+
+            {/* ================= BOTÃO ================= */}
+
+            <div className="flex justify-center">
               <button
                 onClick={handleProcessar}
                 disabled={!layout || !pdfRemessa || isProcessing}
-                className="btn-generate bg-blue-600 hover:bg-blue-700 text-white font-bold py-3 px-6 rounded-lg flex items-center gap-2 disabled:opacity-50"
+                className="bg-blue-600 hover:bg-blue-700 text-white font-bold py-3 px-8 rounded-lg flex items-center gap-2 disabled:opacity-50 transition-all"
               >
                 {isProcessing ? (
                   <>
@@ -154,7 +214,7 @@ export default function CertificadosPage() {
 }
 
 /* =====================================================
-   COMPONENTE UploadCard (FALTAVA)
+   UploadCard
 ===================================================== */
 
 type UploadCardProps = {
@@ -174,14 +234,13 @@ function UploadCard({
   onChange,
   icon,
 }: UploadCardProps) {
+
   return (
-    <div
-      className={`p-8 rounded-2xl border-2 border-dashed transition-all ${
-        file
-          ? "border-blue-500 bg-blue-50"
-          : "border-slate-300 bg-white"
-      }`}
-    >
+    <div className={`p-8 rounded-2xl border-2 border-dashed transition-all ${
+      file
+        ? "border-blue-500 bg-blue-50"
+        : "border-slate-300 bg-white"
+    }`}>
       <div className="flex items-center gap-3 mb-6 text-slate-600">
         {icon}
         <h2 className="font-bold text-lg">{title}</h2>
@@ -192,7 +251,7 @@ function UploadCard({
         accept={accept}
         id={id}
         className="hidden"
-        onChange={(e) => onChange(e.target.files?.[0] ?? null)}
+        onChange={(e)=>onChange(e.target.files?.[0] ?? null)}
       />
 
       <label

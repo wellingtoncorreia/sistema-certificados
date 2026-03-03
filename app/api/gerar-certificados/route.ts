@@ -5,131 +5,323 @@ import fontkit from '@pdf-lib/fontkit';
 export const runtime = 'nodejs';
 
 /* =====================================================
-   EXTRATOR E DATA
+   LIMPAR TEXTO (FIX WinAnsi)
 ===================================================== */
-function extrairAlunos(texto: string): string[] {
-  const alunos: string[] = [];
-  const linhas = texto.split('\n');
-  let nomeAtual = '';
-  for (const linha of linhas) {
-    const limpa = linha.trim();
-    const inicioAluno = limpa.match(/^(\d+)\-([A-ZÀ-Ú\s]+)/);
-    if (inicioAluno) {
-      if (nomeAtual.length > 5) alunos.push(nomeAtual.trim());
-      nomeAtual = inicioAluno[2].trim();
-      continue;
-    }
-    if (nomeAtual && /^[A-ZÀ-Ú\s]+$/.test(limpa) && limpa.length > 2 && 
-        !['Arquitetura', 'Média', 'Frequência'].some(word => limpa.includes(word))) {
-      nomeAtual += ' ' + limpa.trim();
-    }
-  }
-  if (nomeAtual.length > 5) alunos.push(nomeAtual.trim());
-  return [...new Set(alunos)];
-}
-
-function getDataExtenso() {
-  const meses = ['janeiro', 'fevereiro', 'março', 'abril', 'maio', 'junho', 'julho', 'agosto', 'setembro', 'outubro', 'novembro', 'dezembro'];
-  const d = new Date();
-  return `Sorocaba, ${d.getDate()} de ${meses[d.getMonth()]} de ${d.getFullYear()}`;
+function limparTexto(texto: string) {
+  return texto
+    .replace(/\n/g, ' ')
+    .replace(/\r/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
 }
 
 /* =====================================================
-   API ROUTE
+   EXTRAIR ALUNOS (NOME EM 2 LINHAS)
+===================================================== */
+function extrairAlunos(texto: string): string[] {
+
+  const alunos: string[] = [];
+  const linhas = texto.split('\n');
+
+  let nomeAtual = '';
+
+  for (const linha of linhas) {
+
+    const limpa = linha.trim();
+
+    const inicio = limpa.match(/^(\d+)\-([A-ZÀ-Ú\s]+)/);
+
+    if (inicio) {
+      if (nomeAtual.length > 5)
+        alunos.push(limparTexto(nomeAtual));
+
+      nomeAtual = inicio[2];
+      continue;
+    }
+
+    if (
+      nomeAtual &&
+      /^[A-ZÀ-Ú\s]+$/.test(limpa) &&
+      limpa.length > 2 &&
+      !['Arquitetura','Média','Frequência'].some(w =>
+        limpa.includes(w)
+      )
+    ) {
+      nomeAtual += ' ' + limpa;
+    }
+  }
+
+  if (nomeAtual.length > 5)
+    alunos.push(limparTexto(nomeAtual));
+
+  return [...new Set(alunos)];
+}
+
+/* =====================================================
+   EXTRAIR CURSO (REMOVE DATA DE INÍCIO)
+===================================================== */
+function extrairCurso(texto: string): string {
+
+  const match = texto.match(
+    /(Curso\s+(Técnico|de|em)\s+[A-Za-zÀ-ú\s]+)/i
+  );
+
+  if (!match) return 'Desenvolvimento de Sistemas';
+
+  let curso = match[0];
+
+  curso = curso
+    .split(/Data\s+de\s+Início/i)[0]
+    .split(/Carga\s+Horária/i)[0]
+    .split(/Turno/i)[0]
+    .split(/Turma/i)[0];
+
+  return limparTexto(curso);
+}
+
+/* =====================================================
+   DATA EXTENSO
+===================================================== */
+function getDataExtenso() {
+  const meses = [
+    'janeiro','fevereiro','março','abril','maio','junho',
+    'julho','agosto','setembro','outubro','novembro','dezembro'
+  ];
+
+  const d = new Date();
+
+  return `Sorocaba, ${d.getDate()} de ${
+    meses[d.getMonth()]
+  } de ${d.getFullYear()}`;
+}
+
+/* =====================================================
+   API
 ===================================================== */
 export async function POST(req: NextRequest) {
-  try {
-    const formData = await req.formData();
-    const pdfFile = formData.get('file') as File | null;
-    const layoutFile = formData.get('layout') as File | null;
 
-    if (!pdfFile || !layoutFile) return NextResponse.json({ error: 'Arquivos ausentes' }, { status: 400 });
+  try {
+
+    const formData = await req.formData();
+
+    const pdfFile = formData.get('file') as File;
+    const layoutFile = formData.get('layout') as File;
+
+    const semestre = limparTexto(
+      (formData.get('semestre') as string) || 'primeiro'
+    );
+
+    const ano = limparTexto(
+      (formData.get('ano') as string) || '2026'
+    );
+
+    const coordenador = limparTexto(
+      (formData.get('coordenador') as string) || ''
+    );
+
+    if (!pdfFile || !layoutFile)
+      return NextResponse.json(
+        { error: 'Arquivos ausentes' },
+        { status: 400 }
+      );
+
+    /* ========= LER PDF ========= */
 
     const pdfParse = (await import('pdf-parse')).default;
-    const buffer = Buffer.from(await pdfFile.arrayBuffer());
+
+    const buffer = Buffer.from(
+      await pdfFile.arrayBuffer()
+    );
+
     const data = await pdfParse(buffer);
+
     const alunos = extrairAlunos(data.text);
+    const curso = extrairCurso(data.text);
+
+    if (!alunos.length)
+      return NextResponse.json(
+        { error: 'Nenhum aluno encontrado' },
+        { status: 404 }
+      );
+
+    /* ========= CRIAR PDF ========= */
 
     const pdfDoc = await PDFDocument.create();
     pdfDoc.registerFontkit(fontkit);
 
-    const fontBytes = await fetch(new URL('/fonts/GreatVibes-Regular.ttf', req.url)).then(res => res.arrayBuffer());
-    const fontNome = await pdfDoc.embedFont(fontBytes);
-    const fontPadrao = await pdfDoc.embedFont(StandardFonts.Helvetica);
-    const fontNegrito = await pdfDoc.embedFont(StandardFonts.HelveticaBold);
+    /* fonte manuscrita */
+    const fontBytes = await fetch(
+      new URL('/fonts/GreatVibes-Regular.ttf', req.url)
+    ).then(r => r.arrayBuffer());
 
+    const fontNome = await pdfDoc.embedFont(fontBytes);
+
+    const fontPadrao =
+      await pdfDoc.embedFont(StandardFonts.Helvetica);
+
+    const fontNegrito =
+      await pdfDoc.embedFont(StandardFonts.HelveticaBold);
+
+    /* layout */
     const layoutBytes = await layoutFile.arrayBuffer();
-    const layout = layoutFile.type === 'image/png' ? await pdfDoc.embedPng(layoutBytes) : await pdfDoc.embedJpg(layoutBytes);
+
+    const layout =
+      layoutFile.type === 'image/png'
+        ? await pdfDoc.embedPng(layoutBytes)
+        : await pdfDoc.embedJpg(layoutBytes);
+
     const { width: largura, height: altura } = layout;
 
-    // 5.3cm do topo = ~150 pontos
     const yTopo = altura - 150;
 
-    for (const nome of alunos) {
-      const page = pdfDoc.addPage([largura, altura]);
-      page.drawImage(layout, { x: 0, y: 0, width: largura, height: altura });
+    /* =====================================================
+       LOOP CERTIFICADOS
+    ===================================================== */
 
-      // 1. CABEÇALHO (Escola e Faculdade)
-      const cabecalhos = ["ESCOLA E FACULDADE DE TECNOLOGIA", "SENAI GASPAR RICARDO JUNIOR"];
+    for (const nomeRaw of alunos) {
+
+      const nome = limparTexto(
+        nomeRaw.toLowerCase()
+          .replace(/\b\w/g, l => l.toUpperCase())
+      );
+
+      const page = pdfDoc.addPage([largura, altura]);
+
+      page.drawImage(layout, {
+        x: 0,
+        y: 0,
+        width: largura,
+        height: altura,
+      });
+
+      /* ===== CABEÇALHO ===== */
+
+      const cabecalhos = [
+        "ESCOLA E FACULDADE DE TECNOLOGIA",
+        "SENAI GASPAR RICARDO JUNIOR"
+      ];
+
       cabecalhos.forEach((txt, i) => {
         const size = 12;
-        const w = fontNegrito.widthOfTextAtSize(txt, size);
-        page.drawText(txt, { x: (largura - w) / 2, y: yTopo - (i * 15), size, font: fontNegrito });
+        const w =
+          fontNegrito.widthOfTextAtSize(txt, size);
+
+        page.drawText(txt, {
+          x: (largura - w) / 2,
+          y: yTopo - (i * 15),
+          size,
+          font: fontNegrito,
+        });
       });
 
-      // 2. NOME (Posicionado mais alto para diminuir o espaço central)
-      const nomeFormatado = nome.toLowerCase().replace(/\b\w/g, l => l.toUpperCase());
+      /* ===== NOME ===== */
+
       const sizeNome = 65;
-      const yNome = altura * 0.52; // Ajustado conforme as setas da sua imagem
-      const wNome = fontNome.widthOfTextAtSize(nomeFormatado, sizeNome);
-      page.drawText(nomeFormatado, { x: (largura - wNome) / 2, y: yNome, size: sizeNome, font: fontNome });
+      const yNome = altura * 0.52;
 
-      // 3. TEXTO DE HOMENAGEM
+      const wNome =
+        fontNome.widthOfTextAtSize(nome, sizeNome);
+
+      page.drawText(nome, {
+        x: (largura - wNome) / 2,
+        y: yNome,
+        size: sizeNome,
+        font: fontNome,
+      });
+
+      /* ===== TEXTO DINÂMICO ===== */
+
       const frases = [
-        "Homenageamos o(a) aluno(a), regularmente matriculado(a) no Curso Técnico em Desenvolvimento de Sistemas,",
-        "por ter apresentado EXCELENTE APROVEITAMENTO ESCOLAR + 100% de FREQUÊNCIA ESCOLAR",
-        "no segundo semestre do ano letivo 2025."
+        `Homenageamos o(a) aluno(a), regularmente matriculado(a) no ${curso},`,
+        `por ter apresentado EXCELENTE APROVEITAMENTO ESCOLAR + 100% de FREQUÊNCIA ESCOLAR`,
+        `no ${semestre} semestre do ano letivo ${ano}.`
       ];
-      let yHomenagem = yNome - 45;
+
+      let yTexto = yNome - 45;
+
       frases.forEach(frase => {
+
+        const limpa = limparTexto(frase);
+
         const size = 14;
-        const w = fontPadrao.widthOfTextAtSize(frase, size);
-        page.drawText(frase, { x: (largura - w) / 2, y: yHomenagem, size, font: fontPadrao });
-        yHomenagem -= 20;
+
+        const w =
+          fontPadrao.widthOfTextAtSize(limpa, size);
+
+        page.drawText(limpa, {
+          x: (largura - w) / 2,
+          y: yTexto,
+          size,
+          font: fontPadrao,
+        });
+
+        yTexto -= 20;
       });
 
-      // 4. DATA (Acima do logo SENAI - ajustado para não sobrepor)
-      const txtData = getDataExtenso();
-      page.drawText(txtData, {
-        x: 120, // Levemente para a direita para centralizar sobre o logo
-        y: 155, // Aumentado para ficar ACIMA do logo, não sobre ele
+      /* ===== DATA ===== */
+
+      page.drawText(getDataExtenso(), {
+        x: 120,
+        y: 155,
         size: 16,
-        font: fontPadrao
+        font: fontPadrao,
       });
 
-      // 5. ASSINATURA (Lado direito)
+      /* ===== ASSINATURA ===== */
+
       const xAss = largura - 450;
       const yAss = 80;
       const linhaWidth = 220;
 
       page.drawLine({
-        start: { x: xAss, y: yAss + 18 },
-        end: { x: xAss + linhaWidth, y: yAss + 18 },
+        start: { x: xAss, y: yAss + 28 },
+        end: { x: xAss + linhaWidth, y: yAss + 28 },
         thickness: 0.8,
-        color: rgb(0, 0, 0)
+        color: rgb(0, 0, 0),
+      });
+
+      const wCoord =
+        fontPadrao.widthOfTextAtSize(coordenador, 11);
+
+      page.drawText(coordenador, {
+        x: xAss + (linhaWidth - wCoord) / 2,
+        y: yAss + 10,
+        size: 11,
+        font: fontPadrao,
       });
 
       const cargo = "Coordenador Pedagógico";
-      const wCargo = fontPadrao.widthOfTextAtSize(cargo, 11);
-      page.drawText(cargo, { x: xAss + (linhaWidth - wCargo) / 2, y: yAss, size: 11, font: fontPadrao });
+
+      const wCargo =
+        fontPadrao.widthOfTextAtSize(cargo, 10);
+
+      page.drawText(cargo, {
+        x: xAss + (linhaWidth - wCargo) / 2,
+        y: yAss - 5,
+        size: 10,
+        font: fontPadrao,
+      });
     }
 
+    /* ========= FINAL ========= */
+
     const finalPdf = await pdfDoc.save();
+
     return new NextResponse(finalPdf, {
-      headers: { 'Content-Type': 'application/pdf', 'Content-Disposition': 'attachment; filename=certificados_senai.pdf' }
+      headers: {
+        'Content-Type': 'application/pdf',
+        'Content-Disposition':
+          'attachment; filename=certificados_senai.pdf',
+      },
     });
 
   } catch (error: any) {
-    return NextResponse.json({ error: error.message }, { status: 500 });
+
+    console.error(error);
+
+    return NextResponse.json(
+      { error: error.message },
+      { status: 500 }
+    );
   }
 }
