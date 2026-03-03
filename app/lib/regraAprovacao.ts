@@ -1,3 +1,6 @@
-export function aprovado(media?: number, presenca?: number) {
-  return (media >= 95) || (presenca === 100)
+export function aprovado(nota: number, frequencia: number) {
+  // regra SENAI
+  if (frequencia === 100) return true;
+  if (nota >= 7 && frequencia >= 75) return true;
+  return false;
 }

@@ -1,0 +1,21 @@
+.sidebar-container {
+  /* Garante que a sidebar seja fixa ou acompanhe o scroll dependendo do layout */
+  position: sticky;
+  top: 0;
+  height: 100vh;
+  z-index: 40;
+}
+
+/* Efeito de escala suave nos ícones ao passar o rato */
+.sidebar-container a:hover svg, 
+.sidebar-container button:hover svg {
+  transform: scale(1.1);
+  transition: transform 0.2s ease;
+}
+
+/* Estilo para ecrãs pequenos (ajuste opcional se usar mobile menu) */
+@media (max-width: 768px) {
+  .sidebar-container {
+    display: none; /* Em mobile, você pode implementar um menu sanduíche depois */
+  }
+}
